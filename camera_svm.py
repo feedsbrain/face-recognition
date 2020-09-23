@@ -1,79 +1,98 @@
-# Train multiple images per person
-# Find and recognize faces in an image using a SVC with scikit-learn
-
-"""
-Structure:
-        <test_image>.jpg
-        <train_dir>/
-            <person_1>/
-                <person_1_face-1>.jpg
-                <person_1_face-2>.jpg
-                .
-                .
-                <person_1_face-n>.jpg
-           <person_2>/
-                <person_2_face-1>.jpg
-                <person_2_face-2>.jpg
-                .
-                .
-                <person_2_face-n>.jpg
-            .
-            .
-            <person_n>/
-                <person_n_face-1>.jpg
-                <person_n_face-2>.jpg
-                .
-                .
-                <person_n_face-n>.jpg
-"""
-
 import face_recognition
-from sklearn import svm
+import cv2
+import numpy as np
+import pickle
 import os
+import os.path
 
-# Training the SVC classifier
+# This is a demo of running face recognition on live video from your webcam. It's a little more complicated than the
+# other example, but it includes some basic performance tweaks to make things run a lot faster:
+#   1. Process each video frame at 1/4 resolution (though still display it at full resolution)
+#   2. Only detect faces in every other frame of video.
 
-# The training data would be all the face encodings from all the known images and the labels are their names
-encodings = []
-names = []
+# PLEASE NOTE: This example requires OpenCV (the `cv2` library) to be installed only to read from your webcam.
+# OpenCV is *not* required to use the face_recognition library. It's only required if you want to run this
+# specific demo. If you have trouble installing it, try any of the other demos that don't require it instead.
 
-# Training directory
-train_dir = os.listdir('./images/train/')
+# Get a reference to webcam #0 (the default one)
+video_capture = cv2.VideoCapture(0)
 
-# Loop through each person in the training directory
-for person in train_dir:
-    pix = os.listdir("./images/train/" + person)
+# Initialize some variables
+process_this_frame = True
 
-    # Loop through each training image for the current person
-    for person_img in pix:
-        # Get the face encodings for the face in each image file
-        face = face_recognition.load_image_file("./images/train/" + person + "/" + person_img)
-        face_bounding_boxes = face_recognition.face_locations(face)
+def predict(frame, knn_clf=None, model_path=None, distance_threshold=0.6):
+    if knn_clf is None and model_path is None:
+        raise Exception("Must supply knn classifier either thourgh knn_clf or model_path")
 
-        #If training image contains exactly one face
-        if len(face_bounding_boxes) == 1:
-            face_enc = face_recognition.face_encodings(face)[0]
-            # Add face encoding for current image with corresponding label (name) to the training data
-            encodings.append(face_enc)
-            names.append(person)
-        else:
-            print(person + "/" + person_img + " was skipped and can't be used for training")
+    # Load a trained KNN model (if one was passed in)
+    if knn_clf is None:
+        with open(model_path, 'rb') as f:
+            knn_clf = pickle.load(f)
 
-# Create and train the SVC classifier
-clf = svm.SVC(gamma='scale')
-clf.fit(encodings,names)
+    # Load image file and find face locations
+    X_face_locations = face_recognition.face_locations(frame)
 
-# Load the test image with unknown faces into a numpy array
-test_image = face_recognition.load_image_file('./images/test/family.jpg')
+    # If no faces are found in the image, return an empty result.
+    if len(X_face_locations) == 0:
+        return []
 
-# Find all the faces in the test image using the default HOG-based model
-face_locations = face_recognition.face_locations(test_image)
-no = len(face_locations)
-print("Number of faces detected: ", no)
+    # Find encodings for faces in the test iamge
+    faces_encodings = face_recognition.face_encodings(frame, known_face_locations=X_face_locations)
 
-# Predict all the faces in the test image using the trained classifier
-print("Found:")
-for i in range(no):
-    test_image_enc = face_recognition.face_encodings(test_image)[i]
-    name = clf.predict([test_image_enc])
-    print(*name)
+    # Use the KNN model to find the best matches for the test face
+    closest_distances = knn_clf.kneighbors(faces_encodings, n_neighbors=1)
+    are_matches = [closest_distances[0][i][0] <= distance_threshold for i in range(len(X_face_locations))]
+
+    # Predict classes and remove classifications that aren't within the threshold
+    return [(pred, loc) if rec else ("unknown", loc) for pred, loc, rec in zip(knn_clf.predict(faces_encodings), X_face_locations, are_matches)]
+
+while True:
+    # Grab a single frame of video
+    ret, frame = video_capture.read()
+
+    # Resize frame of video to 1/4 size for faster face recognition processing
+    small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+
+    # Convert the image from BGR color (which OpenCV uses) to RGB color (which face_recognition uses)
+    rgb_small_frame = small_frame[:, :, ::-1]
+
+    # Only process every other frame of video to save time
+    if process_this_frame:
+        # Find all people in the image using a trained classifier model
+        # Note: You can pass in either a classifier file name or a classifier model instance
+        predictions = predict(small_frame, model_path="./models/trained_knn_model.clf")
+
+    process_this_frame = not process_this_frame
+
+    # Print results on the console
+    for name, (top, right, bottom, left) in predictions:
+        print("- Found {} at ({}, {})".format(name, left, top))
+
+        # Scale back up face locations since the frame we detected in was scaled to 1/4 size
+        top *= 4
+        right *= 4
+        bottom *= 4
+        left *= 4
+
+        # There's a bug in Pillow where it blows up with non-UTF-8 text
+        # when using the default bitmap font
+        # name = name.encode("UTF-8")
+
+        # Draw a box around the face
+        cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
+
+        # Draw a label with a name below the face
+        cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
+        font = cv2.FONT_HERSHEY_DUPLEX
+        cv2.putText(frame, name, (left + 6, bottom - 6), font, 1.0, (255, 255, 255), 1)
+
+    # Display the resulting image
+    cv2.imshow('Video', frame)
+
+    # Hit 'q' on the keyboard to quit!
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Release handle to the webcam
+video_capture.release()
+cv2.destroyAllWindows()
