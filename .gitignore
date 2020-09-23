@@ -129,8 +129,8 @@ dmypy.json
 .pyre/
 
 # Don't commit images
-images/train/**/
-images/test/*
+data/train/**/
+data/test/*
 
 # Don't commit models
 models/*.clf

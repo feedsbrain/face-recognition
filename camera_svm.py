@@ -5,29 +5,20 @@ import pickle
 import os
 import os.path
 
-# This is a demo of running face recognition on live video from your webcam. It's a little more complicated than the
-# other example, but it includes some basic performance tweaks to make things run a lot faster:
-#   1. Process each video frame at 1/4 resolution (though still display it at full resolution)
-#   2. Only detect faces in every other frame of video.
-
-# PLEASE NOTE: This example requires OpenCV (the `cv2` library) to be installed only to read from your webcam.
-# OpenCV is *not* required to use the face_recognition library. It's only required if you want to run this
-# specific demo. If you have trouble installing it, try any of the other demos that don't require it instead.
-
 # Get a reference to webcam #0 (the default one)
 video_capture = cv2.VideoCapture(0)
 
 # Initialize some variables
 process_this_frame = True
 
-def predict(frame, knn_clf=None, model_path=None, distance_threshold=0.6):
-    if knn_clf is None and model_path is None:
-        raise Exception("Must supply knn classifier either thourgh knn_clf or model_path")
+def predict(frame, svm_clf=None, model_path=None):
+    if svm_clf is None and model_path is None:
+        raise Exception("Must supply knn classifier either thourgh svm_clf or model_path")
 
     # Load a trained KNN model (if one was passed in)
-    if knn_clf is None:
+    if svm_clf is None:
         with open(model_path, 'rb') as f:
-            knn_clf = pickle.load(f)
+            svm_clf = pickle.load(f)
 
     # Load image file and find face locations
     X_face_locations = face_recognition.face_locations(frame)
@@ -39,12 +30,8 @@ def predict(frame, knn_clf=None, model_path=None, distance_threshold=0.6):
     # Find encodings for faces in the test iamge
     faces_encodings = face_recognition.face_encodings(frame, known_face_locations=X_face_locations)
 
-    # Use the KNN model to find the best matches for the test face
-    closest_distances = knn_clf.kneighbors(faces_encodings, n_neighbors=1)
-    are_matches = [closest_distances[0][i][0] <= distance_threshold for i in range(len(X_face_locations))]
-
     # Predict classes and remove classifications that aren't within the threshold
-    return [(pred, loc) if rec else ("unknown", loc) for pred, loc, rec in zip(knn_clf.predict(faces_encodings), X_face_locations, are_matches)]
+    return [(pred, loc) if pred else ("unknown", loc) for pred, loc in zip(svm_clf.predict(faces_encodings), X_face_locations)]
 
 while True:
     # Grab a single frame of video
@@ -60,7 +47,7 @@ while True:
     if process_this_frame:
         # Find all people in the image using a trained classifier model
         # Note: You can pass in either a classifier file name or a classifier model instance
-        predictions = predict(small_frame, model_path="./models/trained_knn_model.clf")
+        predictions = predict(small_frame, model_path="./models/trained_svm_model.clf")
 
     process_this_frame = not process_this_frame
 

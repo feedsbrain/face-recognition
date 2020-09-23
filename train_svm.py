@@ -6,11 +6,11 @@ import face_recognition
 import cv2
 import math
 
-from sklearn import neighbors
+from sklearn import svm
 from PIL import Image, ImageDraw
 from tools.files import image_files_in_folder, video_files_in_folder
 
-def train(train_dir, model_save_path=None, n_neighbors=None, knn_algo='ball_tree', verbose=False):
+def train(train_dir, model_save_path=None, verbose=False):
     X = []
     y = []
 
@@ -54,8 +54,8 @@ def train(train_dir, model_save_path=None, n_neighbors=None, knn_algo='ball_tree
                 if not ret:
                     break
 
-                # process every 15 frames
-                if (frame_number % 15 != 0):
+                # process every 5 frames
+                if (frame_number % 5 != 0):
                   continue
 
                 print("Processing video: {} frame {} of {}".format(vid_path, frame_number, length))
@@ -78,29 +78,22 @@ def train(train_dir, model_save_path=None, n_neighbors=None, knn_algo='ball_tree
 
             input_movie.release
 
-    # Determine how many neighbors to use for weighting in the KNN classifier
-    if n_neighbors is None:
-        n_neighbors = int(round(math.sqrt(len(X))))
-        if verbose:
-            print("Chose n_neighbors automatically:", n_neighbors)
-
-    # Create and train the KNN classifier
-    knn_clf = neighbors.KNeighborsClassifier(
-        n_neighbors=n_neighbors, algorithm=knn_algo, weights='distance')
-    knn_clf.fit(X, y)
+    # Create and train the SVC classifier
+    svm_clf = svm.SVC(gamma='scale',class_weight='balanced')
+    svm_clf.fit(X, y)
 
     # Save the trained KNN classifier
     if model_save_path is not None:
         with open(model_save_path, 'wb') as f:
-            pickle.dump(knn_clf, f)
+            pickle.dump(svm_clf, f)
 
-    return knn_clf
+    return svm_clf
 
 
 if __name__ == "__main__":
-    # Train the KNN classifier and save it to disk
+    # Train the SVM classifier and save it to disk
     # Once the model is trained and saved, you can skip this step next time.
-    print("Training KNN classifier...")
+    print("Training SVM classifier...")
     classifier = train(
-        "./data/train", model_save_path="./models/trained_knn_model.clf", n_neighbors=2)
+        "./data/train", model_save_path="./models/trained_svm_model.clf")
     print("Training complete!")
