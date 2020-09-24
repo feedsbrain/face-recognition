@@ -9,6 +9,7 @@ import math
 from sklearn import neighbors
 from PIL import Image, ImageDraw
 from tools.files import image_files_in_folder, video_files_in_folder
+from tools.rotate_image import get_rotation_with_ffprobe, rotate_frame
 
 def train(train_dir, model_save_path=None, n_neighbors=None, knn_algo='ball_tree', verbose=False):
     X = []
@@ -41,6 +42,9 @@ def train(train_dir, model_save_path=None, n_neighbors=None, knn_algo='ball_tree
         for vid_path in video_files_in_folder(os.path.join(train_dir, class_dir)):
             print("Processing video: {}".format(vid_path))
 
+            # requires ffprobe
+            rotation = get_rotation_with_ffprobe(vid_path)
+
             input_movie = cv2.VideoCapture(vid_path)
             length = int(input_movie.get(cv2.CAP_PROP_FRAME_COUNT))
             frame_number = 0
@@ -54,16 +58,18 @@ def train(train_dir, model_save_path=None, n_neighbors=None, knn_algo='ball_tree
                 if not ret:
                     break
 
-                # process every 15 frames
+                # Process every 15 frames
                 if (frame_number % 15 != 0):
                   continue
 
                 print("Processing video: {} frame {} of {}".format(vid_path, frame_number, length))
 
-                # Convert the image from BGR color (which OpenCV uses) to RGB color (which face_recognition uses)
-                rgb_frame = frame[:, :, ::-1]
-                face_bounding_boxes = face_recognition.face_locations(
-                    rgb_frame)
+                # Rotate video if rotation value != 0
+                frame = rotate_frame(frame, rotation)
+                face_bounding_boxes = face_recognition.face_locations(frame)
+
+                # We can remove next line after we validate the frame extraction is good
+                cv2.imwrite("{}-frame_{}.jpg".format(vid_path, frame_number), frame)
 
                 if len(face_bounding_boxes) != 1:
                     # If there are no people (or too many people) in a training image, skip the image.
@@ -72,8 +78,7 @@ def train(train_dir, model_save_path=None, n_neighbors=None, knn_algo='ball_tree
                             face_bounding_boxes) < 1 else "Found more than one face"))
                 else:
                     # Add face encoding for current image to the training set
-                    X.append(face_recognition.face_encodings(
-                        image, known_face_locations=face_bounding_boxes)[0])
+                    X.append(face_recognition.face_encodings(frame, known_face_locations=face_bounding_boxes)[0])
                     y.append(class_dir)
 
             input_movie.release
